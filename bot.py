@@ -6,16 +6,27 @@ from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, fil
 from telegram.constants import ChatAction
 import asyncio
 
+import os
+import json
+
+# ⚠️ NEW TOKEN use করো (old leaked token use করো না)
 TOKEN = "8529913372:AAFzMAqPNWlQFhMjHAoxDqTkzWngHGJtQkQ"
 PASSWORD = "Sabnur123"
 
-# 🔥 Firebase setup
-cred = credentials.Certificate("serviceAccountKey.json")
-firebase_admin.initialize_app(cred, {
-    'databaseURL': 'https://tic-tac-toe-5a407-default-rtdb.firebaseio.com/'
-})
+# 🔥 Firebase setup (Render safe)
+firebase_json = os.environ.get("FIREBASE_KEY")
 
-ref = db.reference("files")
+if firebase_json:
+    cred_dict = json.loads(firebase_json)
+    cred = credentials.Certificate(cred_dict)
+
+    firebase_admin.initialize_app(cred, {
+        'databaseURL': 'https://tic-tac-toe-5a407-default-rtdb.firebaseio.com/'
+    })
+
+    ref = db.reference("files")
+else:
+    ref = None
 
 user_waiting_password = {}
 
@@ -41,8 +52,9 @@ async def check_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
             file_name = file.file_name
             file_key = str(file_id)[-8:]
 
-            # 🔥 Firebase-এ save
-            ref.child(file_key).set(file_id)
+            # 🔥 Firebase save (safe)
+            if ref:
+                ref.child(file_key).set(file_id)
 
             bot_username = (await context.bot.get_me()).username
             link = f"https://t.me/{bot_username}?start={file_key}"
@@ -67,11 +79,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.args:
         key = context.args[0]
 
-        # 🔥 Firebase থেকে load
-        file_id = ref.child(key).get()
+        # 🔥 Firebase load (safe)
+        file_id = ref.child(key).get() if ref else None
 
         if file_id:
-            await update.message.reply_text(f"📦 Sending file...")
+            await update.message.reply_text("📦 Sending file...")
             await update.message.reply_document(file_id)
         else:
             await update.message.reply_text("❌ File not found")
