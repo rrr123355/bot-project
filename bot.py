@@ -2,37 +2,30 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, filters, ContextTypes
 from telegram.constants import ChatAction
 import asyncio
-import firebase_admin
-from firebase_admin import credentials, db
-import os, json
 
 TOKEN = "8529913372:AAFzMAqPNWlQFhMjHAoxDqTkzWngHGJtQkQ"
+
+# 👉 এখানে password সেট করো
 PASSWORD = "Sabnur123"
 
-firebase_json = os.environ.get("FIREBASE_KEY")
-
-if firebase_json:
-    cred_dict = json.loads(firebase_json)
-    cred = credentials.Certificate(cred_dict)
-
-    firebase_admin.initialize_app(cred, {
-        'databaseURL': 'YOUR_DB_URL'
-    })
-
-    ref = db.reference("files")
-else:
-    ref = None
-
+# temp storage
+file_store = {}
 user_waiting_password = {}
 
+# 🔹 যখন file পাঠাবে
 async def save_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     file = update.message.document
 
     if file:
+        # user কে password দিতে বলবে
         user_waiting_password[user_id] = file
-        await update.message.reply_text("🔐 Enter password:")
 
+        await update.message.reply_text(
+            "🔐 Please enter password to generate link:"
+        )
+
+# 🔹 password check
 async def check_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text
@@ -41,47 +34,64 @@ async def check_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if text == PASSWORD:
             file = user_waiting_password[user_id]
 
+            await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
+            await asyncio.sleep(1)
+
             file_id = file.file_id
             file_name = file.file_name
             file_key = str(file_id)[-8:]
 
-            if ref:
-                ref.child(file_key).set(file_id)
+            file_store[file_key] = file_id
 
             bot_username = (await context.bot.get_me()).username
             link = f"https://t.me/{bot_username}?start={file_key}"
 
-            keyboard = [[InlineKeyboardButton("📥 Open Link", url=link)]]
+            keyboard = [
+                [InlineKeyboardButton("📥 Open Link", url=link)]
+            ]
             reply_markup = InlineKeyboardMarkup(keyboard)
 
             await update.message.reply_text(
-                f"✅ Authorized!\n\n📂 {file_name}\n🔗 {link}",
+                f"✅ <b>Authorized!</b>\n\n"
+                f"📂 <b>{file_name}</b>\n"
+                f"🔗 <b>Link:</b>\n{link}",
+                parse_mode="HTML",
                 reply_markup=reply_markup
             )
 
             del user_waiting_password[user_id]
+
         else:
             await update.message.reply_text("❌ Wrong password!")
 
+# 🔹 start command (file send)
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user.first_name
+
     if context.args:
         key = context.args[0]
 
-        file_id = ref.child(key).get() if ref else None
+        if key in file_store:
+            await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
+            await asyncio.sleep(2)
 
-        if file_id:
-            await update.message.reply_text("📦 Sending file...")
-            await update.message.reply_document(file_id)
+            await update.message.reply_text(f"👋 Hello {user}\n📦 Sending your file...")
+
+            await update.message.reply_document(file_store[key])
         else:
-            await update.message.reply_text("❌ File not found")
-    else:
-        await update.message.reply_text("🤖 Send file + password")
+            await update.message.reply_text("❌ File not found or expired")
 
+    else:
+        await update.message.reply_text(
+            "🤖 Welcome!\n\nSend file + password to get shareable link 🔐"
+        )
+
+# app
 app = ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
 app.add_handler(MessageHandler(filters.Document.ALL, save_file))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, check_password))
 
-print("🔥 Bot running...")
+print("🔐 Bot running with password system...")
 app.run_polling()
