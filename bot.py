@@ -3,8 +3,7 @@ from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, fil
 from telegram.constants import ChatAction
 import asyncio
 
-# ⚠️ নিজের নতুন TOKEN বসাও (BotFather থেকে)
-TOKEN = "8529913372:AAFzMAqPNWlQFhMjHAoxDqTkzWngHGJtQkQ"
+TOKEN = "8529913372:AAFzMAqPNWlQFhMjHAoxDqTkzWngHGJtQkQ"  # 🔴 এখানে নতুন token বসাও
 
 PASSWORD = "Sabnur123"
 
@@ -12,45 +11,36 @@ file_store = {}
 user_waiting_password = {}
 user_delete_request = {}
 
-# 🔹 ফাইল save
 async def save_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message and update.message.document:
         user_id = update.effective_user.id
         file = update.message.document
-
         user_waiting_password[user_id] = file
-        await update.message.reply_text("🔐 Please enter password to generate link:")
+        await update.message.reply_text("🔐 Please enter password:")
 
 
-# 🔹 password check + link generate
 async def check_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
         return
 
     user_id = update.effective_user.id
-    text = update.message.text
+    text = update.message.text if update.message else ""
 
-    # 🔴 delete confirm
     if user_id in user_delete_request:
         if text == PASSWORD:
-            file_key = user_delete_request[user_id]
-            if file_key in file_store:
-                file_name = file_store[file_key]["file_name"]
-                del file_store[file_key]
-
-                await update.message.reply_text(
-                    f"✅ File deleted!\n\n📂 {file_name}\n🔗 Link expired."
-                )
+            key = user_delete_request[user_id]
+            if key in file_store:
+                name = file_store[key]["file_name"]
+                del file_store[key]
+                await update.message.reply_text(f"✅ Deleted\n📂 {name}")
             else:
-                await update.message.reply_text("❌ File not found.")
-
+                await update.message.reply_text("❌ Not found")
         else:
-            await update.message.reply_text("❌ Wrong password!")
+            await update.message.reply_text("❌ Wrong password")
 
         del user_delete_request[user_id]
         return
 
-    # 🔹 generate link
     if user_id in user_waiting_password:
         if text == PASSWORD:
             file = user_waiting_password[user_id]
@@ -63,54 +53,51 @@ async def check_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             file_id = file.file_id
             file_name = file.file_name
-            file_key = str(file_id)[-8:]
+            key = str(file_id)[-8:]
 
-            file_store[file_key] = {
+            file_store[key] = {
                 "file_id": file_id,
                 "file_name": file_name,
                 "owner_id": user_id
             }
 
             bot_username = (await context.bot.get_me()).username
-            link = f"https://t.me/{bot_username}?start={file_key}"
+            link = f"https://t.me/{bot_username}?start={key}"
 
             keyboard = [[InlineKeyboardButton("📥 Open Link", url=link)]]
 
             await update.message.reply_text(
-                f"✅ Authorized!\n\n📂 {file_name}\n🔗 {link}\n\nUse /delete to remove file.",
+                f"✅ {file_name}\n🔗 {link}",
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
 
             del user_waiting_password[user_id]
         else:
-            await update.message.reply_text("❌ Wrong password!")
+            await update.message.reply_text("❌ Wrong password")
 
 
-# 🔹 delete command
 async def delete_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
 
-    user_files = {k: v for k, v in file_store.items() if v["owner_id"] == user_id}
+    files = {k: v for k, v in file_store.items() if v["owner_id"] == user_id}
 
-    if not user_files:
-        await update.message.reply_text("📭 No files found.")
+    if not files:
+        await update.message.reply_text("📭 No files")
         return
 
     keyboard = []
-    for key, val in user_files.items():
-        name = val["file_name"]
-        short = name[:30] + "..." if len(name) > 30 else name
-        keyboard.append([InlineKeyboardButton(short, callback_data=f"del_{key}")])
+    for k, v in files.items():
+        name = v["file_name"]
+        keyboard.append([InlineKeyboardButton(name[:30], callback_data=f"del_{k}")])
 
     keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="del_cancel")])
 
     await update.message.reply_text(
-        "🗑 Select file to delete:",
+        "🗑 Select file:",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
 
-# 🔹 button handler
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -125,46 +112,25 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data.startswith("del_"):
         key = data.split("_")[1]
 
-        if key in file_store:
-            if file_store[key]["owner_id"] == user_id:
-                file_name = file_store[key]["file_name"]
-
-                user_delete_request[user_id] = key
-
-                await query.edit_message_text(
-                    f"🔐 Enter password to delete:\n\n📂 {file_name}"
-                )
-            else:
-                await query.edit_message_text("❌ Not your file")
+        if key in file_store and file_store[key]["owner_id"] == user_id:
+            user_delete_request[user_id] = key
+            await query.edit_message_text("🔐 Enter password to delete")
         else:
-            await query.edit_message_text("❌ File not found")
+            await query.edit_message_text("❌ Error")
 
 
-# 🔹 start command
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user.first_name
-
     if context.args:
         key = context.args[0]
 
         if key in file_store:
-            await context.bot.send_chat_action(
-                chat_id=update.effective_chat.id,
-                action=ChatAction.TYPING
-            )
-            await asyncio.sleep(1)
-
-            await update.message.reply_text(f"👋 {user}\n📦 Sending file...")
             await update.message.reply_document(file_store[key]["file_id"])
         else:
-            await update.message.reply_text("❌ File expired")
+            await update.message.reply_text("❌ Expired")
     else:
-        await update.message.reply_text(
-            "🤖 Send file → enter password → get link\n\nUse /delete to remove files"
-        )
+        await update.message.reply_text("🤖 Send file → password → get link")
 
 
-# 🔹 run app
 app = ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
